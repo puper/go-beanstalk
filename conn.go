@@ -98,19 +98,22 @@ func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interfa
 }
 
 func (c *Conn) reconnect() error {
-	log.Println("reconnect...")
+	log.Println("reconnect start...")
 	c.Close()
 	if c.network == "" || c.addr == "" {
 		return fmt.Errorf("can not reconnect, not provide network, addr")
 	}
 	conn, err := Dial(c.network, c.addr)
+	c.connError = err
 	if err != nil {
+		log.Println("reconnect error: ", err.Error())
+		time.Sleep(2 * time.Second) //重连还是失败，等待2秒
 		return fmt.Errorf("reconnect error: %v", err.Error())
 	}
+	log.Println("reconnect start...")
 	c.c = conn.c
 	c.used = conn.used
 	c.watched = conn.watched
-	c.connError = err
 	return nil
 }
 
