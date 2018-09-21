@@ -16,8 +16,10 @@ import (
 // documentation of those types for details.
 type Conn struct {
 	//save for reconnect
-	network string
-	addr    string
+	network   string
+	addr      string
+	connError error
+
 	c       *textproto.Conn
 	used    string
 	watched map[string]bool
@@ -66,6 +68,14 @@ func (c *Conn) Close() error {
 func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interface{}) (req, error) {
 	r := req{c.c.Next(), op}
 	c.c.StartRequest(r.id)
+	defer c.c.EndRequest(r.id)
+	//请求前检查是否连接错误
+	if c.connError != nil {
+		c.reconnect()
+		if c.connError != nil {
+			return req{}, c.connError
+		}
+	}
 	err := c.adjustTubes(t, ts)
 	if err != nil {
 		return req{}, err
@@ -84,12 +94,11 @@ func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interfa
 		c.reconnect()
 		return req{}, ConnError{c, op, err}
 	}
-	c.c.EndRequest(r.id)
 	return r, nil
 }
 
 func (c *Conn) reconnect() error {
-	log.Println("reconnect")
+	log.Println("reconnect...")
 	c.Close()
 	if c.network == "" || c.addr == "" {
 		return fmt.Errorf("can not reconnect, not provide network, addr")
@@ -101,6 +110,7 @@ func (c *Conn) reconnect() error {
 	c.c = conn.c
 	c.used = conn.used
 	c.watched = conn.watched
+	c.connError = err
 	return nil
 }
 
