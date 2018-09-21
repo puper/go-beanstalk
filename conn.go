@@ -123,6 +123,10 @@ func (c *Conn) adjustTubes(t *Tube, ts *TubeSet) error {
 		c.used = t.Name
 	}
 	if ts != nil {
+		if ts.Mutex != nil {
+			ts.Mutex.RLock()
+			defer ts.Mutex.RUnlock()
+		}
 		for s := range ts.Name {
 			if !c.watched[s] {
 				if err := checkName(s); err != nil {

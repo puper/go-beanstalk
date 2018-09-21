@@ -1,6 +1,7 @@
 package beanstalk
 
 import (
+	"sync"
 	"time"
 )
 
@@ -9,11 +10,13 @@ import (
 type TubeSet struct {
 	Conn *Conn
 	Name map[string]bool
+	//protect names
+	Mutex *sync.RWMutex
 }
 
 // NewTubeSet returns a new TubeSet representing the given names.
 func NewTubeSet(c *Conn, name ...string) *TubeSet {
-	ts := &TubeSet{c, make(map[string]bool)}
+	ts := &TubeSet{Conn: c, Name: make(map[string]bool)}
 	for _, s := range name {
 		ts.Name[s] = true
 	}
