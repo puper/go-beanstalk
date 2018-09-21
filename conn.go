@@ -3,6 +3,7 @@ package beanstalk
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/textproto"
 	"strings"
@@ -14,6 +15,9 @@ import (
 // connection. The embedded types carry methods with them; see the
 // documentation of those types for details.
 type Conn struct {
+	//save for reconnect
+	network string
+	addr    string
 	c       *textproto.Conn
 	used    string
 	watched map[string]bool
@@ -48,7 +52,10 @@ func Dial(network, addr string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewConn(c), nil
+	conn := NewConn(c)
+	conn.network = network
+	conn.addr = addr
+	return conn, nil
 }
 
 // Close closes the underlying network connection.
@@ -72,11 +79,29 @@ func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interfa
 		c.c.W.Write(crnl)
 	}
 	err = c.c.W.Flush()
+	//这里失败了，就返回失败，并且重连一次(感觉这里始终不会报错)
 	if err != nil {
+		c.reconnect()
 		return req{}, ConnError{c, op, err}
 	}
 	c.c.EndRequest(r.id)
 	return r, nil
+}
+
+func (c *Conn) reconnect() error {
+	log.Println("reconnect")
+	c.Close()
+	if c.network == "" || c.addr == "" {
+		return fmt.Errorf("can not reconnect, not provide network, addr")
+	}
+	conn, err := Dial(c.network, c.addr)
+	if err != nil {
+		return fmt.Errorf("reconnect error: %v", err.Error())
+	}
+	c.c = conn.c
+	c.used = conn.used
+	c.watched = conn.watched
+	return nil
 }
 
 func (c *Conn) adjustTubes(t *Tube, ts *TubeSet) error {
@@ -127,6 +152,8 @@ func (c *Conn) readResp(r req, readBody bool, f string, a ...interface{}) (body 
 		line, err = c.c.ReadLine()
 	}
 	if err != nil {
+		//重连
+		c.reconnect()
 		return nil, ConnError{c, r.op, err}
 	}
 	toScan := line
