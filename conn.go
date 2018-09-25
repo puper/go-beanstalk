@@ -3,7 +3,6 @@ package beanstalk
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/textproto"
 	"strings"
@@ -15,11 +14,6 @@ import (
 // connection. The embedded types carry methods with them; see the
 // documentation of those types for details.
 type Conn struct {
-	//save for reconnect
-	network   string
-	addr      string
-	connError error
-
 	c       *textproto.Conn
 	used    string
 	watched map[string]bool
@@ -55,8 +49,6 @@ func Dial(network, addr string) (*Conn, error) {
 		return nil, err
 	}
 	conn := NewConn(c)
-	conn.network = network
-	conn.addr = addr
 	return conn, nil
 }
 
@@ -69,13 +61,6 @@ func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interfa
 	r := req{c.c.Next(), op}
 	c.c.StartRequest(r.id)
 	defer c.c.EndRequest(r.id)
-	//请求前检查是否连接错误
-	if c.connError != nil {
-		c.reconnect()
-		if c.connError != nil {
-			return req{}, c.connError
-		}
-	}
 	err := c.adjustTubes(t, ts)
 	if err != nil {
 		return req{}, err
@@ -91,30 +76,9 @@ func (c *Conn) cmd(t *Tube, ts *TubeSet, body []byte, op string, args ...interfa
 	err = c.c.W.Flush()
 	//这里失败了，就返回失败，并且重连一次(感觉这里始终不会报错)
 	if err != nil {
-		c.reconnect()
 		return req{}, ConnError{c, op, err}
 	}
 	return r, nil
-}
-
-func (c *Conn) reconnect() error {
-	log.Println("reconnect start...")
-	c.Close()
-	if c.network == "" || c.addr == "" {
-		return fmt.Errorf("can not reconnect, not provide network, addr")
-	}
-	conn, err := Dial(c.network, c.addr)
-	c.connError = err
-	if err != nil {
-		log.Println("reconnect error: ", err.Error())
-		time.Sleep(2 * time.Second) //重连还是失败，等待2秒
-		return fmt.Errorf("reconnect error: %v", err.Error())
-	}
-	log.Println("reconnect start...")
-	c.c = conn.c
-	c.used = conn.used
-	c.watched = conn.watched
-	return nil
 }
 
 func (c *Conn) adjustTubes(t *Tube, ts *TubeSet) error {
@@ -169,8 +133,6 @@ func (c *Conn) readResp(r req, readBody bool, f string, a ...interface{}) (body 
 		line, err = c.c.ReadLine()
 	}
 	if err != nil {
-		//重连
-		c.reconnect()
 		return nil, ConnError{c, r.op, err}
 	}
 	toScan := line
